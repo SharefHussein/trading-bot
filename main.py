@@ -35,7 +35,7 @@ def run_bot():
                 if decision in ["LONG", "SHORT"]:
                     ex.set_leverage(20, symbol)
                     side = 'buy' if "LONG" in decision else 'sell'
-                    ex.create_market_order(symbol, side, 1.0)
+                    ex.create_market_order(symbol, side, 0.5)
                     print(f"✅ تم فتح صفقة {decision} على {symbol} بسعر {price}")
                 
                 time.sleep(300) 
