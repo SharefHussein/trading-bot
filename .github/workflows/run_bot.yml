@@ -1,6 +1,6 @@
 name: Run Trading Bot
 on:
-  workflow_dispatch: # للتشغيل اليدوي بضغطة زر
+  workflow_dispatch: # للتشغيل اليدوي
 
 jobs:
   build:
@@ -19,5 +19,9 @@ jobs:
           pip install ccxt openai requests
 
       - name: Run Bot
+        env:
+          OPENAI: ${{ secrets.OPENAI }}
+          BINGX_APIKEY: ${{ secrets.BINGX_APIKEY }}
+          BINGX_SECRETKEY: ${{ secrets.BINGX_SECRETKEY }}
         run: python main.py
 
