@@ -1,30 +1,50 @@
 import ccxt
-from openai import OpenAI
 import time
 import os
 import sys
 
-# التأكد من الطباعة الفورية في السجلات
+# التأكد من الطباعة الفورية في سجلات GitHub
 def log_print(msg):
     print(msg)
     sys.stdout.flush()
 
-# سحب المفاتيح
-OPENAI_KEY = os.getenv("OPENAI")
-BINGX_API = os.getenv("BINGX_APIKEY")
-BINGX_SECRET = os.getenv("BINGX_SECRETKEY")
+# سحب مفاتيح BingX فقط (لا نحتاج OpenAI الآن)
+BK = os.getenv("BINGX_APIKEY")
+BS = os.getenv("BINGX_SECRETKEY")
 
 try:
-    client = OpenAI(api_key=OPENAI_KEY)
-    ex = ccxt.bingx({'apiKey': BINGX_API, 'secret': BINGX_SECRET, 'options': {'defaultType': 'swap'}})
-    log_print("✅ تم الاتصال بـ BingX و OpenAI بنجاح")
+    ex = ccxt.bingx({
+        'apiKey': BK, 
+        'secret': BS, 
+        'options': {'defaultType': 'swap'}
+    })
+    log_print("✅ تم الاتصال بـ BingX بنجاح (الوضع المجاني المؤتمت)")
 except Exception as e:
-    log_print(f"❌ خطأ في الإعدادات: {e}")
+    log_print(f"❌ خطأ في الاتصال بـ BingX: {e}")
 
-symbols = ["SOL/USDT", "AVAX/USDT", "DOGE/USDT"]
+symbols = ["SOL/USDT", "AVAX/USDT", "DOGE/USDT", "NEAR/USDT"]
+
+def get_signal(symbol):
+    try:
+        # جلب الشموع (إطار 15 دقيقة) لتحليل الاتجاه
+        ohlcv = ex.fetch_ohlcv(symbol, timeframe='15m', limit=50)
+        closes = [x[4] for x in ohlcv]
+        
+        # حساب مؤشر بسيط (RSI البدائي)
+        last_price = closes[-1]
+        prev_price = closes[-2]
+        
+        # استراتيجية بسيطة: إذا انخفض السعر كثيراً نشتري، وإذا ارتفع كثيراً نبيع
+        if last_price < sum(closes)/len(closes) * 0.98: 
+            return "LONG"
+        elif last_price > sum(closes)/len(closes) * 1.02:
+            return "SHORT"
+        return "WAIT"
+    except:
+        return "WAIT"
 
 def run_bot():
-    log_print("🚀 انطلاق الوكيل الذكي... جاري فحص السوق")
+    log_print("🚀 انطلاق البوت المجاني 24/7 (بدون تكاليف OpenAI)")
     
     while True:
         for symbol in symbols:
@@ -32,27 +52,25 @@ def run_bot():
                 ticker = ex.fetch_ticker(symbol)
                 price = ticker['last']
                 
-                res = client.chat.completions.create(
-                    model="gpt-4o", 
-                    messages=[{"role": "user", "content": f"Quick analysis for {symbol} at {price}. Answer ONLY 'LONG' or 'SHORT'."}]
-                )
-                decision = res.choices[0].message.content.strip().upper()
+                # الحصول على إشارة فنية بدلاً من ذكاء اصطناعي
+                decision = get_signal(symbol)
                 
                 if decision in ["LONG", "SHORT"]:
-                    log_print(f"📊 قرار الذكاء الاصطناعي لـ {symbol}: {decision}")
+                    log_print(f"📊 إشارة فنية لـ {symbol}: {decision}")
                     ex.set_leverage(20, symbol)
                     
-                    # فتح صفقة بقيمة 2 دولار تقريباً (آمن للرصيد الصغير)
+                    # حجم الصفقة (حوالي 2 دولار)
                     amount = 2.0 / price 
-                    side = 'buy' if "LONG" in decision else 'sell'
+                    side = 'buy' if decision == "LONG" else 'sell'
                     
                     order = ex.create_market_order(symbol, side, amount)
-                    log_print(f"✅ تم تنفيذ صفقة {decision} بنجاح!")
+                    log_print(f"✅ تم تنفيذ صفقة {decision} بنجاح على {symbol}")
                 
-                time.sleep(60) # فحص كل دقيقة
+                time.sleep(60) 
             except Exception as e:
                 log_print(f"⚠️ تنبيه في {symbol}: {e}")
                 time.sleep(10)
+        time.sleep(300)
 
 if __name__ == "__main__":
     run_bot()
