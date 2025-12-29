@@ -1,6 +1,6 @@
 name: Run Trading Bot
 on:
-  workflow_dispatch: # للتشغيل اليدوي الآن
+  workflow_dispatch: # للتشغيل اليدوي بضغطة زر
 
 jobs:
   build:
@@ -8,12 +8,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+
       - name: Install dependencies
         run: |
           pip install ccxt openai requests
+
       - name: Run Bot
         run: python main.py
+
