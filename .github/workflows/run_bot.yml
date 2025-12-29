@@ -1,20 +1,19 @@
 name: Run Trading Bot
 on:
-  schedule:
-    - cron: '0 */6 * * *' # سيعيد تشغيل نفسه كل 6 ساعات لضمان الاستمرارية
-  workflow_dispatch: # يسمح لك بتشغيله يدوياً
+  workflow_dispatch: # للتشغيل اليدوي الآن
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Set up Python
-        uses: set-up-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: pip install ccxt openai
+        run: |
+          pip install ccxt openai requests
       - name: Run Bot
         run: python main.py
