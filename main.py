@@ -8,7 +8,7 @@ def log_print(msg):
     print(msg)
     sys.stdout.flush()
 
-# سحب مفاتيح BingX فقط (لا نحتاج OpenAI الآن)
+# سحب مفاتيح BingX
 BK = os.getenv("BINGX_APIKEY")
 BS = os.getenv("BINGX_SECRETKEY")
 
@@ -18,55 +18,51 @@ try:
         'secret': BS, 
         'options': {'defaultType': 'swap'}
     })
-    log_print("✅ تم الاتصال بـ BingX بنجاح (الوضع المجاني المؤتمت)")
+    log_print("✅ تم الاتصال بـ BingX بنجاح (الوضع المجاني)")
 except Exception as e:
-    log_print(f"❌ خطأ في الاتصال بـ BingX: {e}")
+    log_print(f"❌ خطأ في الاتصال: {e}")
 
 symbols = ["SOL/USDT", "AVAX/USDT", "DOGE/USDT", "NEAR/USDT"]
 
 def get_signal(symbol):
     try:
-        # جلب الشموع (إطار 15 دقيقة) لتحليل الاتجاه
         ohlcv = ex.fetch_ohlcv(symbol, timeframe='15m', limit=50)
         closes = [x[4] for x in ohlcv]
-        
-        # حساب مؤشر بسيط (RSI البدائي)
         last_price = closes[-1]
-        prev_price = closes[-2]
+        avg_price = sum(closes) / len(closes)
         
-        # استراتيجية بسيطة: إذا انخفض السعر كثيراً نشتري، وإذا ارتفع كثيراً نبيع
-        if last_price < sum(closes)/len(closes) * 0.98: 
-            return "LONG"
-        elif last_price > sum(closes)/len(closes) * 1.02:
-            return "SHORT"
+        if last_price < avg_price * 0.99: return "LONG"
+        elif last_price > avg_price * 1.01: return "SHORT"
         return "WAIT"
     except:
         return "WAIT"
 
 def run_bot():
-    log_print("🚀 انطلاق البوت المجاني 24/7 (بدون تكاليف OpenAI)")
+    log_print("🚀 انطلاق البوت... جاري فحص الفرص")
     
     while True:
         for symbol in symbols:
             try:
-                ticker = ex.fetch_ticker(symbol)
-                price = ticker['last']
-                
-                # الحصول على إشارة فنية بدلاً من ذكاء اصطناعي
                 decision = get_signal(symbol)
                 
                 if decision in ["LONG", "SHORT"]:
-                    log_print(f"📊 إشارة فنية لـ {symbol}: {decision}")
-                    ex.set_leverage(20, symbol)
+                    log_print(f"📊 إشارة لـ {symbol}: {decision}")
                     
-                    # حجم الصفقة (حوالي 2 دولار)
-                    amount = 2.0 / price 
+                    # --- التعديل هنا لحل مشكلة setLeverage ---
+                    try:
+                        ex.set_leverage(20, symbol, {'side': 'BOTH'}) 
+                    except:
+                        pass # إذا كانت مضبوطة مسبقاً سيتخطى الخطأ
+                    
+                    ticker = ex.fetch_ticker(symbol)
+                    price = ticker['last']
+                    amount = 2.0 / price # حجم صفقة بـ 2 دولار
+                    
                     side = 'buy' if decision == "LONG" else 'sell'
-                    
                     order = ex.create_market_order(symbol, side, amount)
-                    log_print(f"✅ تم تنفيذ صفقة {decision} بنجاح على {symbol}")
+                    log_print(f"✅ تم تنفيذ صفقة {decision} على {symbol}")
                 
-                time.sleep(60) 
+                time.sleep(30) # فحص سريع كل 30 ثانية
             except Exception as e:
                 log_print(f"⚠️ تنبيه في {symbol}: {e}")
                 time.sleep(10)
