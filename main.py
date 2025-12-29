@@ -2,24 +2,30 @@ import ccxt
 from openai import OpenAI
 import time
 import os
+import sys
 
-# سحب المفاتيح من GitHub Secrets بناءً على الأسماء في صورتك
-OK = os.getenv("OPENAI")
-BK = os.getenv("BINGX_APIKEY")
-BS = os.getenv("BINGX_SECRETKEY")
+# التأكد من الطباعة الفورية في السجلات
+def log_print(msg):
+    print(msg)
+    sys.stdout.flush()
 
-client = OpenAI(api_key=OK)
-ex = ccxt.bingx({'apiKey': BK, 'secret': BS, 'options': {'defaultType': 'swap'}})
+# سحب المفاتيح
+OPENAI_KEY = os.getenv("OPENAI")
+BINGX_API = os.getenv("BINGX_APIKEY")
+BINGX_SECRET = os.getenv("BINGX_SECRETKEY")
 
-symbols = ["SOL/USDT", "AVAX/USDT", "DOGE/USDT", "NEAR/USDT", "LINK/USDT"]
+try:
+    client = OpenAI(api_key=OPENAI_KEY)
+    ex = ccxt.bingx({'apiKey': BINGX_API, 'secret': BINGX_SECRET, 'options': {'defaultType': 'swap'}})
+    log_print("✅ تم الاتصال بـ BingX و OpenAI بنجاح")
+except Exception as e:
+    log_print(f"❌ خطأ في الإعدادات: {e}")
+
+symbols = ["SOL/USDT", "AVAX/USDT", "DOGE/USDT"]
 
 def run_bot():
-    print("🚀 انطلاق الوكيل الذكي (نسخة Secrets الآمنة)...")
+    log_print("🚀 انطلاق الوكيل الذكي... جاري فحص السوق")
     
-    if not OK or not BK or not BS:
-        print("❌ خطأ: لم يتم العثور على المفاتيح. تأكد من مطابقة الأسماء في Secrets.")
-        return
-
     while True:
         for symbol in symbols:
             try:
@@ -33,16 +39,21 @@ def run_bot():
                 decision = res.choices[0].message.content.strip().upper()
                 
                 if decision in ["LONG", "SHORT"]:
+                    log_print(f"📊 قرار الذكاء الاصطناعي لـ {symbol}: {decision}")
                     ex.set_leverage(20, symbol)
+                    
+                    # فتح صفقة بقيمة 2 دولار تقريباً (آمن للرصيد الصغير)
+                    amount = 2.0 / price 
                     side = 'buy' if "LONG" in decision else 'sell'
-                    ex.create_market_order(symbol, side, 0.5)
-                    print(f"✅ تم فتح صفقة {decision} على {symbol} بسعر {price}")
+                    
+                    order = ex.create_market_order(symbol, side, amount)
+                    log_print(f"✅ تم تنفيذ صفقة {decision} بنجاح!")
                 
-                time.sleep(300) 
+                time.sleep(60) # فحص كل دقيقة
             except Exception as e:
-                print(f"⚠️ تنبيه: {e}")
-                time.sleep(30)
-        time.sleep(60)
+                log_print(f"⚠️ تنبيه في {symbol}: {e}")
+                time.sleep(10)
 
 if __name__ == "__main__":
     run_bot()
+
