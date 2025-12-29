@@ -11,56 +11,47 @@ BK = os.getenv("BINGX_APIKEY")
 BS = os.getenv("BINGX_SECRETKEY")
 
 try:
-    # إعداد صارم للتعامل مع العقود الآجلة فقط
+    # تعديل الإعدادات للوصول للمحفظة التي تظهر عندك (بهامش USD)
     ex = ccxt.bingx({
         'apiKey': BK, 
         'secret': BS, 
-        'options': {'defaultType': 'swap'} 
+        'options': {
+            'defaultType': 'swap',
+            'accountsByType': {'swap': 'future'} # محاولة الوصول للحساب الموحد
+        }
     })
-    log_print("✅ متصل بـ BingX - وضع العقود الآجلة")
+    log_print("✅ تم الربط بالمحفظة المتاحة (بهامش USD)")
 except Exception as e:
-    log_print(f"❌ خطأ اتصال: {e}")
+    log_print(f"❌ خطأ: {e}")
 
-symbols = ["SOL/USDT", "AVAX/USDT", "DOGE/USDT", "NEAR/USDT"]
-
-def get_signal(symbol):
-    try:
-        ohlcv = ex.fetch_ohlcv(symbol, timeframe='15m', limit=50)
-        closes = [x[4] for x in ohlcv]
-        last_price = closes[-1]
-        avg_price = sum(closes) / len(closes)
-        if last_price < avg_price * 0.995: return "LONG"
-        elif last_price > avg_price * 1.005: return "SHORT"
-        return "WAIT"
-    except: return "WAIT"
+symbols = ["SOL/USDT", "AVAX/USDT", "DOGE/USDT"]
 
 def run_bot():
-    log_print("🚀 تشغيل البوت بمبلغ 1$ من محفظة العقود...")
+    log_print("🚀 فحص الرصيد والبدء...")
     
     while True:
         for symbol in symbols:
             try:
-                decision = get_signal(symbol)
-                if decision in ["LONG", "SHORT"]:
-                    # التأكد من ضبط الرافعة
-                    try: ex.set_leverage(20, symbol)
-                    except: pass
-                    
-                    ticker = ex.fetch_ticker(symbol)
-                    price = ticker['last']
-                    
-                    # تنفيذ الصفقة بمبلغ 1 دولار (سيستخدم رصيد العقود الآجلة)
-                    amount = 1.0 / price 
-                    side = 'buy' if decision == "LONG" else 'sell'
-                    
-                    # تحديد params لضمان استخدام محفظة العقود
-                    order = ex.create_market_order(symbol, side, amount)
-                    log_print(f"✅ نجاح! فتح صفقة {decision} على {symbol}")
+                # محاولة جلب الرصيد من المحفظة التي بها 2.15$
+                balance = ex.fetch_balance()
+                # طباعة الرصيد المتاح لنتأكد مما يراه البوت فعلياً
+                log_print(f"💰 الرصيد المتاح حالياً: {balance['free'].get('USDT', 0)}")
                 
-                time.sleep(20)
+                ticker = ex.fetch_ticker(symbol)
+                price = ticker['last']
+                
+                # تنفيذ الصفقة بمبلغ 1.2$ لضمان تجاوز الحد الأدنى
+                amount = 1.2 / price 
+                
+                # استراتيجية سريعة (شراء عند الانخفاض)
+                ohlcv = ex.fetch_ohlcv(symbol, timeframe='5m', limit=2)
+                if ohlcv[-1][4] < ohlcv[-2][4]:
+                    order = ex.create_market_order(symbol, 'buy', amount)
+                    log_print(f"✅ تمت العملية بنجاح على {symbol}")
+                
+                time.sleep(30)
             except Exception as e:
-                # إذا ظهر خطأ الرصيد، سيطبع لنا التفاصيل بدقة
-                log_print(f"⚠️ {symbol}: {e}")
+                log_print(f"⚠️ تنبيه: {e}")
                 time.sleep(10)
         time.sleep(300)
 
