@@ -1,26 +1,31 @@
-name: Run Trading Bot
+name: BingX 24/7 Bot
+
 on:
-  workflow_dispatch: # للتشغيل اليدوي
+  schedule:
+    # سيقوم GitHub بتشغيل البوت تلقائياً كل 4 ساعات لضمان عدم توقفه نهائياً
+    - cron: '0 */4 * * *'
+  workflow_dispatch: # يتيح لك تشغيله يدوياً في أي وقت
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v2
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v2
         with:
           python-version: '3.9'
 
       - name: Install dependencies
         run: |
-          pip install ccxt openai requests
+          python -m pip install --upgrade pip
+          pip install ccxt
 
       - name: Run Bot
         env:
-          OPENAI: ${{ secrets.OPENAI }}
           BINGX_APIKEY: ${{ secrets.BINGX_APIKEY }}
           BINGX_SECRETKEY: ${{ secrets.BINGX_SECRETKEY }}
         run: python main.py
