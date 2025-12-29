@@ -21,7 +21,7 @@ try:
 except Exception as e:
     log_print(f"❌ خطأ اتصال: {e}")
 
-symbols = ["RIVER/USDT", "PIPPIN/USDT", "SQD/USDT", "BEAT/USDT"]
+symbols = ["SOL/USDT", "AVAX/USDT", "DOGE/USDT", "NEAR/USDT"]
 
 def get_signal(symbol):
     try:
@@ -43,7 +43,7 @@ def run_bot():
                 decision = get_signal(symbol)
                 if decision in ["LONG", "SHORT"]:
                     # التأكد من ضبط الرافعة
-                    try: ex.set_leverage(25, symbol)
+                    try: ex.set_leverage(20, symbol)
                     except: pass
                     
                     ticker = ex.fetch_ticker(symbol)
