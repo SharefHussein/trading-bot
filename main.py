@@ -4,13 +4,13 @@ import os
 import sys
 from datetime import datetime
 
-# ============ إعدادات القناص العدواني (تجاوز الحد الأدنى) ============
+# ============ إعدادات توزيع الرصيد (أجزاء صغيرة جداً) ============
 class Config:
     LEVERAGE = 50                     
-    MAX_OPEN_POSITIONS = 1            # تركيز كامل الرصيد في صفقة واحدة لضمان قوتها
-    STOP_LOSS_PERCENT = 1.2          
-    TAKE_PROFIT_PERCENT = 1.5        
-    RSI_BUY_THRESHOLD = 55           # دخول سريع جداً
+    MAX_OPEN_POSITIONS = 5            # فتح حتى 5 صفقات لتوزيع الـ 1.4$
+    STOP_LOSS_PERCENT = 1.5          
+    TAKE_PROFIT_PERCENT = 2.0        
+    RSI_BUY_THRESHOLD = 52           
     MIN_VOLUME_USDT = 500000         
     CHECK_INTERVAL = 10              
 
@@ -36,9 +36,9 @@ def run_bot():
     
     try:
         ex = ccxt.bingx({'apiKey': BK, 'secret': BS, 'options': {'defaultType': 'swap'}})
-        log_print("🔥 تم تشغيل النسخة النهائية - تجاوز قيود الحد الأدنى")
+        log_print("🤖 بوت الأجزاء الصغيرة يعمل.. (توزيع الرصيد)")
     except Exception as e:
-        log_print(f"❌ خطأ اتصال: {e}")
+        log_print(f"❌ خطأ: {e}")
         return
 
     while True:
@@ -53,14 +53,13 @@ def run_bot():
                 time.sleep(20)
                 continue
 
-            if avail < 1.0:
-                log_print(f"💰 الرصيد المتاح {avail:.2f}$ قليل جداً")
+            if avail < 0.2: # الحد الأدنى لبقاء البوت يعمل
                 time.sleep(30)
                 continue
 
             tickers = ex.fetch_tickers()
             symbols = [s for s, t in tickers.items() if s.endswith('/USDT') and t.get('quoteVolume', 0) > Config.MIN_VOLUME_USDT]
-            symbols = sorted(symbols, key=lambda x: tickers[x]['quoteVolume'], reverse=True)[:100]
+            symbols = sorted(symbols, key=lambda x: tickers[x]['quoteVolume'], reverse=True)[:50]
 
             for symbol in symbols:
                 try:
@@ -71,11 +70,12 @@ def run_bot():
                     if rsi < Config.RSI_BUY_THRESHOLD:
                         price = tickers[symbol]['last']
                         
-                        # التعديل الجوهري: استخدام 95% من الرصيد مع الرافعة لكسر حاجز الـ 2.01$
-                        # القيمة الإجمالية ستكون حوالي 70$ (1.47 * 0.95 * 50)
-                        amount = (avail * 0.95 * Config.LEVERAGE) / price 
+                        # حساب الكمية: سندخل بقيمة عقد 2.5$ لضمان القبول
+                        # الهامش المخصوم من رصيدك سيكون: 2.5 / 50 = 0.05$ فقط
+                        target_contract_value = 2.5 
+                        amount = target_contract_value / price 
                         
-                        log_print(f"⚡ محاولة دخول: {symbol} بقيمة إجمالية تقديرية {avail * 0.95 * Config.LEVERAGE:.2f}$")
+                        log_print(f"🎯 دخول صفقة في {symbol} | الهامش المستهلك: 0.05$ تقريباً")
                         
                         ex.set_leverage(Config.LEVERAGE, symbol)
                         ex.create_market_order(symbol, 'buy', amount)
@@ -86,10 +86,9 @@ def run_bot():
                         ex.create_order(symbol, 'limit', 'sell', amount, tp, {'reduceOnly': True})
                         ex.create_order(symbol, 'stop', 'sell', amount, None, {'stopPrice': sl, 'reduceOnly': True})
                         
-                        log_print(f"✅ تم التنفيذ بنجاح في {symbol}")
+                        log_print(f"✅ تم فتح الصفقة بربح مستهدف {tp:.4f}")
                         break 
-                except Exception as e:
-                    continue
+                except: continue
             
             time.sleep(Config.CHECK_INTERVAL)
 
