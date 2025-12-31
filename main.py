@@ -7,9 +7,12 @@ from datetime import datetime
 class Config:
     LEVERAGE = 20                     
     MAX_OPEN_POSITIONS = 1            
-    TAKE_PROFIT_PERCENT = 1.2        
-    MAX_LOSS_USD = 0.05              # خط أحمر لا يتجاوزه البوت
-    CHECK_INTERVAL = 5               
+    TAKE_PROFIT_PERCENT = 1.0        # تقليل الهدف لسرعة الخروج بربح
+    MAX_LOSS_USD = 0.05              
+    # حساسية فائقة: أي انحراف بسيط سيؤدي للدخول
+    BUY_TRIGGER = 48                 # شراء إذا نزل RSI عن 48 (حساس جداً)
+    SELL_TRIGGER = 52                # بيع إذا زاد RSI عن 52 (حساس جداً)
+    CHECK_INTERVAL = 2               # فحص كل ثانيتين
 
 def log_print(msg):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -32,9 +35,9 @@ def run_bot():
     BS = os.getenv("BINGX_SECRETKEY")
     try:
         ex = ccxt.bingx({'apiKey': BK, 'secret': BS, 'options': {'defaultType': 'swap'}})
-        log_print("🤖 البوت الذكي نشط.. يبحث عن أفضل فرصة متاحة الآن")
+        log_print("🔥 وضع الهجوم النشط: سأدخل في أول حركة للسوق!")
     except Exception as e:
-        log_print(f"❌ خطأ اتصال: {e}")
+        log_print(f"❌ خطأ: {e}")
         return
 
     while True:
@@ -43,60 +46,51 @@ def run_bot():
             open_pos = [p for p in positions if float(p['info'].get('positionAmt', 0)) != 0]
 
             if len(open_pos) >= Config.MAX_OPEN_POSITIONS:
-                time.sleep(20)
+                time.sleep(10)
                 continue
 
             tickers = ex.fetch_tickers()
+            # ترتيب العملات حسب التغير السعري لنجد الأكثر حركة
             symbols = [s for s, t in tickers.items() if s.endswith('/USDT')]
             
-            best_opportunity = None
-            max_deviation = 0 # لقياس مدى ابتعاد العملة عن المنطقة المستقرة
-
-            for symbol in symbols[:40]: 
+            for symbol in symbols[:15]: # فحص أسرع 15 عملة فقط لضمان سرعة التنفيذ
                 try:
-                    ohlcv = ex.fetch_ohlcv(symbol, timeframe='1m', limit=20)
+                    ohlcv = ex.fetch_ohlcv(symbol, timeframe='1m', limit=15)
                     closes = [x[4] for x in ohlcv]
                     rsi = calculate_rsi(closes)
                     
-                    # البوت يبحث عن العملة الأكثر انحرافاً عن رقم 50 (سواء صعوداً أو هبوطاً)
-                    deviation = abs(rsi - 50)
-                    if deviation > max_deviation:
-                        max_deviation = deviation
-                        best_opportunity = {'symbol': symbol, 'rsi': rsi, 'price': tickers[symbol]['last']}
+                    log_print(f"👀 مراقبة {symbol} | RSI: {rsi:.1f}")
+
+                    price = tickers[symbol]['last']
+                    margin_to_use = 3.8 
+                    raw_amount = (margin_to_use * Config.LEVERAGE) / price
+                    amount = float(ex.amount_to_precision(symbol, raw_amount))
+
+                    # شروط دخول فائقة الحساسية
+                    if rsi < Config.BUY_TRIGGER:
+                        sl = price - (Config.MAX_LOSS_USD / amount)
+                        tp = price * (1 + Config.TAKE_PROFIT_PERCENT / 100)
+                        log_print(f"🚀 دخول شراء فوري: {symbol} (RSI: {rsi:.1f})")
+                        ex.set_leverage(Config.LEVERAGE, symbol)
+                        ex.create_market_buy_order(symbol, amount)
+                        ex.create_order(symbol, 'limit', 'sell', amount, tp, {'reduceOnly': True})
+                        ex.create_order(symbol, 'stop', 'sell', amount, None, {'stopPrice': sl, 'reduceOnly': True})
+                        break
+                    
+                    elif rsi > Config.SELL_TRIGGER:
+                        sl = price + (Config.MAX_LOSS_USD / amount)
+                        tp = price * (1 - Config.TAKE_PROFIT_PERCENT / 100)
+                        log_print(f"🔻 دخول بيع فوري: {symbol} (RSI: {rsi:.1f})")
+                        ex.set_leverage(Config.LEVERAGE, symbol)
+                        ex.create_market_sell_order(symbol, amount)
+                        ex.create_order(symbol, 'limit', 'buy', amount, tp, {'reduceOnly': True})
+                        ex.create_order(symbol, 'stop', 'buy', amount, None, {'stopPrice': sl, 'reduceOnly': True})
+                        break
                 except: continue
-
-            if best_opportunity and max_deviation > 5: # إذا وجد انحرافاً واضحاً عن الاستقرار
-                symbol = best_opportunity['symbol']
-                rsi = best_opportunity['rsi']
-                price = best_opportunity['price']
-                
-                margin_to_use = 3.5 
-                raw_amount = (margin_to_use * Config.LEVERAGE) / price
-                amount = float(ex.amount_to_precision(symbol, raw_amount))
-
-                if rsi < 50: # الاتجاه هابط، إذاً هي فرصة شراء (Long)
-                    sl = price - (Config.MAX_LOSS_USD / amount)
-                    tp = price * (1 + Config.TAKE_PROFIT_PERCENT / 100)
-                    log_print(f"🌟 أفضل فرصة شراء: {symbol} (RSI: {rsi:.1f})")
-                    ex.set_leverage(Config.LEVERAGE, symbol)
-                    ex.create_market_buy_order(symbol, amount)
-                    ex.create_order(symbol, 'limit', 'sell', amount, tp, {'reduceOnly': True})
-                    ex.create_order(symbol, 'stop', 'sell', amount, None, {'stopPrice': sl, 'reduceOnly': True})
-                
-                else: # الاتجاه صاعد، إذاً هي فرصة بيع (Short)
-                    sl = price + (Config.MAX_LOSS_USD / amount)
-                    tp = price * (1 - Config.TAKE_PROFIT_PERCENT / 100)
-                    log_print(f"🌟 أفضل فرصة بيع: {symbol} (RSI: {rsi:.1f})")
-                    ex.set_leverage(Config.LEVERAGE, symbol)
-                    ex.create_market_sell_order(symbol, amount)
-                    ex.create_order(symbol, 'limit', 'buy', amount, tp, {'reduceOnly': True})
-                    ex.create_order(symbol, 'stop', 'buy', amount, None, {'stopPrice': sl, 'reduceOnly': True})
-                
-                log_print(f"✅ تم التنفيذ آلياً بناءً على تحليل السوق.")
-                time.sleep(30) # انتظار بعد التنفيذ
             
             time.sleep(Config.CHECK_INTERVAL)
-        except: time.sleep(10)
+        except Exception as e:
+            time.sleep(5)
 
 if __name__ == "__main__":
     run_bot()
