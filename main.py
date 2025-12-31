@@ -2,24 +2,23 @@ import ccxt
 import time
 import os
 import sys
-from datetime import datetime
+
+# تقليل الرسائل للحد الأدنى (فقط عند التنفيذ)
+def log_print(msg):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 class Config:
-    LEVERAGE = 20                     
-    MAX_OPEN_POSITIONS = 1            
-    TAKE_PROFIT_PERCENT = 1.0        # تقليل الهدف لسرعة الخروج بربح
-    MAX_LOSS_USD = 0.05              
-    # حساسية فائقة: أي انحراف بسيط سيؤدي للدخول
-    BUY_TRIGGER = 48                 # شراء إذا نزل RSI عن 48 (حساس جداً)
-    SELL_TRIGGER = 52                # بيع إذا زاد RSI عن 52 (حساس جداً)
-    CHECK_INTERVAL = 2               # فحص كل ثانيتين
+    LEVERAGE = 20
+    MAX_OPEN_POSITIONS = 1
+    TAKE_PROFIT_PERCENT = 1.0
+    MAX_LOSS_USD = 0.05
+    # حساسية قصوى للدخول الفوري
+    BUY_TRIGGER = 49.9 
+    SELL_TRIGGER = 50.1
+    CHECK_INTERVAL = 1 # فحص كل ثانية واحدة
 
-def log_print(msg):
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] {msg}")
-    sys.stdout.flush()
-
-def calculate_rsi(prices, period=14):
+def calculate_rsi(prices):
+    period = 14
     if len(prices) < period + 1: return 50
     deltas = [prices[i+1] - prices[i] for i in range(len(prices)-1)]
     gains = [d if d > 0 else 0 for d in deltas[-period:]]
@@ -33,64 +32,51 @@ def calculate_rsi(prices, period=14):
 def run_bot():
     BK = os.getenv("BINGX_APIKEY")
     BS = os.getenv("BINGX_SECRETKEY")
-    try:
-        ex = ccxt.bingx({'apiKey': BK, 'secret': BS, 'options': {'defaultType': 'swap'}})
-        log_print("🔥 وضع الهجوم النشط: سأدخل في أول حركة للسوق!")
-    except Exception as e:
-        log_print(f"❌ خطأ: {e}")
-        return
+    ex = ccxt.bingx({'apiKey': BK, 'secret': BS, 'options': {'defaultType': 'swap'}})
+    
+    log_print("🚀 تم تشغيل المحرك الصامت.. البحث عن صفقات قائم الآن")
 
     while True:
         try:
+            # فحص سريع جداً لوجود صفقات
             positions = ex.fetch_positions()
-            open_pos = [p for p in positions if float(p['info'].get('positionAmt', 0)) != 0]
-
-            if len(open_pos) >= Config.MAX_OPEN_POSITIONS:
+            if any(float(p['info'].get('positionAmt', 0)) != 0 for p in positions):
                 time.sleep(10)
                 continue
 
             tickers = ex.fetch_tickers()
-            # ترتيب العملات حسب التغير السعري لنجد الأكثر حركة
             symbols = [s for s, t in tickers.items() if s.endswith('/USDT')]
             
-            for symbol in symbols[:15]: # فحص أسرع 15 عملة فقط لضمان سرعة التنفيذ
+            for symbol in symbols[:20]: # فحص أسرع 20 عملة في السوق
                 try:
                     ohlcv = ex.fetch_ohlcv(symbol, timeframe='1m', limit=15)
-                    closes = [x[4] for x in ohlcv]
-                    rsi = calculate_rsi(closes)
-                    
-                    log_print(f"👀 مراقبة {symbol} | RSI: {rsi:.1f}")
-
+                    rsi = calculate_rsi([x[4] for x in ohlcv])
                     price = tickers[symbol]['last']
-                    margin_to_use = 3.8 
-                    raw_amount = (margin_to_use * Config.LEVERAGE) / price
-                    amount = float(ex.amount_to_precision(symbol, raw_amount))
+                    
+                    # حساب الكمية
+                    amount = float(ex.amount_to_precision(symbol, (3.8 * Config.LEVERAGE) / price))
 
-                    # شروط دخول فائقة الحساسية
                     if rsi < Config.BUY_TRIGGER:
-                        sl = price - (Config.MAX_LOSS_USD / amount)
-                        tp = price * (1 + Config.TAKE_PROFIT_PERCENT / 100)
-                        log_print(f"🚀 دخول شراء فوري: {symbol} (RSI: {rsi:.1f})")
                         ex.set_leverage(Config.LEVERAGE, symbol)
                         ex.create_market_buy_order(symbol, amount)
-                        ex.create_order(symbol, 'limit', 'sell', amount, tp, {'reduceOnly': True})
-                        ex.create_order(symbol, 'stop', 'sell', amount, None, {'stopPrice': sl, 'reduceOnly': True})
+                        # وضع الأهداف
+                        ex.create_order(symbol, 'limit', 'sell', amount, price * (1 + Config.TAKE_PROFIT_PERCENT/100), {'reduceOnly': True})
+                        ex.create_order(symbol, 'stop', 'sell', amount, None, {'stopPrice': price - (Config.MAX_LOSS_USD/amount), 'reduceOnly': True})
+                        log_print(f"✅ تم فتح شراء في {symbol}")
                         break
                     
                     elif rsi > Config.SELL_TRIGGER:
-                        sl = price + (Config.MAX_LOSS_USD / amount)
-                        tp = price * (1 - Config.TAKE_PROFIT_PERCENT / 100)
-                        log_print(f"🔻 دخول بيع فوري: {symbol} (RSI: {rsi:.1f})")
                         ex.set_leverage(Config.LEVERAGE, symbol)
                         ex.create_market_sell_order(symbol, amount)
-                        ex.create_order(symbol, 'limit', 'buy', amount, tp, {'reduceOnly': True})
-                        ex.create_order(symbol, 'stop', 'buy', amount, None, {'stopPrice': sl, 'reduceOnly': True})
+                        # وضع الأهداف
+                        ex.create_order(symbol, 'limit', 'buy', amount, price * (1 - Config.TAKE_PROFIT_PERCENT/100), {'reduceOnly': True})
+                        ex.create_order(symbol, 'stop', 'buy', amount, None, {'stopPrice': price + (Config.MAX_LOSS_USD/amount), 'reduceOnly': True})
+                        log_print(f"✅ تم فتح بيع في {symbol}")
                         break
                 except: continue
             
             time.sleep(Config.CHECK_INTERVAL)
-        except Exception as e:
-            time.sleep(5)
+        except: time.sleep(5)
 
 if __name__ == "__main__":
     run_bot()
