@@ -4,14 +4,11 @@ import os
 import sys
 from datetime import datetime
 
-# ============ إعدادات البيع والشراء (الرافعة 20) ============
 class Config:
     LEVERAGE = 20                     
     MAX_OPEN_POSITIONS = 1            
-    TAKE_PROFIT_PERCENT = 1.5        
-    MAX_LOSS_USD = 0.05              # أقصى خسارة 5 سنتات
-    RSI_BUY_THRESHOLD = 30           # شراء (Long) عند التشبع البيعي
-    RSI_SELL_THRESHOLD = 70          # بيع (Short) عند التشبع الشرائي
+    TAKE_PROFIT_PERCENT = 1.2        
+    MAX_LOSS_USD = 0.05              # خط أحمر لا يتجاوزه البوت
     CHECK_INTERVAL = 5               
 
 def log_print(msg):
@@ -35,66 +32,68 @@ def run_bot():
     BS = os.getenv("BINGX_SECRETKEY")
     try:
         ex = ccxt.bingx({'apiKey': BK, 'secret': BS, 'options': {'defaultType': 'swap'}})
-        log_print(f"🔄 نظام البيع والشراء نشط.. الرافعة: 20 | حماية: 0.05$")
+        log_print("🤖 البوت الذكي نشط.. يبحث عن أفضل فرصة متاحة الآن")
     except Exception as e:
-        log_print(f"❌ خطأ: {e}")
+        log_print(f"❌ خطأ اتصال: {e}")
         return
 
     while True:
         try:
-            balance = ex.fetch_balance()
-            avail = balance['free'].get('USDT', 0)
             positions = ex.fetch_positions()
             open_pos = [p for p in positions if float(p['info'].get('positionAmt', 0)) != 0]
 
             if len(open_pos) >= Config.MAX_OPEN_POSITIONS:
-                time.sleep(30)
+                time.sleep(20)
                 continue
 
             tickers = ex.fetch_tickers()
             symbols = [s for s, t in tickers.items() if s.endswith('/USDT')]
             
-            for symbol in symbols[:50]: 
+            best_opportunity = None
+            max_deviation = 0 # لقياس مدى ابتعاد العملة عن المنطقة المستقرة
+
+            for symbol in symbols[:40]: 
                 try:
                     ohlcv = ex.fetch_ohlcv(symbol, timeframe='1m', limit=20)
                     closes = [x[4] for x in ohlcv]
                     rsi = calculate_rsi(closes)
                     
-                    # مراقبة القيم القريبة من الدخول
-                    if rsi < 35 or rsi > 65:
-                        log_print(f"🔍 {symbol} | RSI: {rsi:.2f}")
-
-                    price = tickers[symbol]['last']
-                    margin_to_use = 3.8
-                    amount = (margin_to_use * Config.LEVERAGE) / price
-                    
-                    # حالة 1: الشراء (Long) - السعر في القاع
-                    if rsi < Config.RSI_BUY_THRESHOLD:
-                        sl = price - (Config.MAX_LOSS_USD / amount)
-                        tp = price * (1 + Config.TAKE_PROFIT_PERCENT / 100)
-                        
-                        log_print(f"🚀 دخول شراء (Long) في {symbol} | RSI: {rsi:.2f}")
-                        ex.set_leverage(Config.LEVERAGE, symbol)
-                        ex.create_market_order(symbol, 'buy', amount)
-                        ex.create_order(symbol, 'limit', 'sell', amount, tp, {'reduceOnly': True})
-                        ex.create_order(symbol, 'stop', 'sell', amount, None, {'stopPrice': sl, 'reduceOnly': True})
-                        log_print(f"✅ تم تنفيذ الشراء.")
-                        break
-
-                    # حالة 2: البيع المكشوف (Short) - السعر في القمة
-                    elif rsi > Config.RSI_SELL_THRESHOLD:
-                        sl = price + (Config.MAX_LOSS_USD / amount)
-                        tp = price * (1 - Config.TAKE_PROFIT_PERCENT / 100)
-                        
-                        log_print(f"🔻 دخول بيع (Short) في {symbol} | RSI: {rsi:.2f}")
-                        ex.set_leverage(Config.LEVERAGE, symbol)
-                        ex.create_market_order(symbol, 'sell', amount)
-                        ex.create_order(symbol, 'limit', 'buy', amount, tp, {'reduceOnly': True})
-                        ex.create_order(symbol, 'stop', 'buy', amount, None, {'stopPrice': sl, 'reduceOnly': True})
-                        log_print(f"✅ تم تنفيذ البيع.")
-                        break 
-
+                    # البوت يبحث عن العملة الأكثر انحرافاً عن رقم 50 (سواء صعوداً أو هبوطاً)
+                    deviation = abs(rsi - 50)
+                    if deviation > max_deviation:
+                        max_deviation = deviation
+                        best_opportunity = {'symbol': symbol, 'rsi': rsi, 'price': tickers[symbol]['last']}
                 except: continue
+
+            if best_opportunity and max_deviation > 5: # إذا وجد انحرافاً واضحاً عن الاستقرار
+                symbol = best_opportunity['symbol']
+                rsi = best_opportunity['rsi']
+                price = best_opportunity['price']
+                
+                margin_to_use = 3.5 
+                raw_amount = (margin_to_use * Config.LEVERAGE) / price
+                amount = float(ex.amount_to_precision(symbol, raw_amount))
+
+                if rsi < 50: # الاتجاه هابط، إذاً هي فرصة شراء (Long)
+                    sl = price - (Config.MAX_LOSS_USD / amount)
+                    tp = price * (1 + Config.TAKE_PROFIT_PERCENT / 100)
+                    log_print(f"🌟 أفضل فرصة شراء: {symbol} (RSI: {rsi:.1f})")
+                    ex.set_leverage(Config.LEVERAGE, symbol)
+                    ex.create_market_buy_order(symbol, amount)
+                    ex.create_order(symbol, 'limit', 'sell', amount, tp, {'reduceOnly': True})
+                    ex.create_order(symbol, 'stop', 'sell', amount, None, {'stopPrice': sl, 'reduceOnly': True})
+                
+                else: # الاتجاه صاعد، إذاً هي فرصة بيع (Short)
+                    sl = price + (Config.MAX_LOSS_USD / amount)
+                    tp = price * (1 - Config.TAKE_PROFIT_PERCENT / 100)
+                    log_print(f"🌟 أفضل فرصة بيع: {symbol} (RSI: {rsi:.1f})")
+                    ex.set_leverage(Config.LEVERAGE, symbol)
+                    ex.create_market_sell_order(symbol, amount)
+                    ex.create_order(symbol, 'limit', 'buy', amount, tp, {'reduceOnly': True})
+                    ex.create_order(symbol, 'stop', 'buy', amount, None, {'stopPrice': sl, 'reduceOnly': True})
+                
+                log_print(f"✅ تم التنفيذ آلياً بناءً على تحليل السوق.")
+                time.sleep(30) # انتظار بعد التنفيذ
             
             time.sleep(Config.CHECK_INTERVAL)
         except: time.sleep(10)
